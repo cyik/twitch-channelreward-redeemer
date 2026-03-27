@@ -4,10 +4,13 @@ A lightweight browser extension that monitors when Twitch chaannel goes live and
 
 ![image alt](https://github.com/cyik/twitch-channelreward-redeemer/blob/3bf66e03935e614367610afe6e6da381cc1a9725/UI%20example3.png)
 
+## Why I made this extension:
+The TwitchAPI (Helix) currently does not support twitch channel redeems actions, because apparently it's "against TOS to automate interactions" (yeah right). So I reverse engineereed the Twitch's Internal GraphQL API to send persisted queries to pretend that I'm a real user sending a channel redemption. This technique allows me to send automated channel redeems, which was not previously available to developers. Smart, I know, I might be the first one to do this. (who knows)
+
 ## Features
-- **Auto-Detection**: Periodic checking (default: 5 mins) of streamer live status, can be set to whatever you like.
+- **Auto-Detection**: Checks live status of streamer every 60 seconds by default (u can set it to whatever you want later)
 - **Auto-Redeem**: Instantly redeems a specific channel point reward as soon as the specified streamer goes live.
-- **Redemption history**: Shows all successful twitch channel redeems that were redeemed through the extension.
+- **Redemption history**: Shows all successful twitch channel redeems that were redeemed through the extension (not fully tested yet)
 
 
 ## Setup Instructions
