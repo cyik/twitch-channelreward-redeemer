@@ -1,11 +1,11 @@
-# Twitch Auto Redeemer Extension
+# Twitch Auto Redeemer Extension by cyik
 
 A lightweight browser extension that monitors when Twitch chaannel goes live and instantly redeems channel rewards as soon as they go live.
 
 ## Features
 - **Auto-Detection**: Periodic checking (default: 5 mins) of streamer live status, can be set to whatever you like.
-- **Auto-Redeem**: Instantly triggers a specific channel point reward upon stream start.
-- **Smart Tracking**: Remembers the last live status to prevent multiple redemptions within the same session.
+- **Auto-Redeem**: Instantly redeems a specific channel point reward as soon as the specified streamer goes live.
+- **Redemption history**: Shows all successful twitch channel redeems that were redeemed through the extension.
 
 
 ## Setup Instructions
