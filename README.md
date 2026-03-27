@@ -2,6 +2,8 @@
 
 A lightweight browser extension that monitors when Twitch chaannel goes live and instantly redeems channel rewards as soon as they go live.
 
+![image alt](https://github.com/cyik/twitch-channelreward-redeemer/blob/4744219b79966112ac2c27d11bb47698a2908f30/twitchredeemer.png)
+
 ## Features
 - **Auto-Detection**: Periodic checking (default: 5 mins) of streamer live status, can be set to whatever you like.
 - **Auto-Redeem**: Instantly redeems a specific channel point reward as soon as the specified streamer goes live.
