@@ -1,6 +1,6 @@
 # Twitch Auto Redeemer Extension by cyik
 
-A lightweight browser extension that monitors when Twitch chaannel goes live and instantly redeems channel rewards as soon as they go live.
+A lightweight browser extension that monitors when Twitch channel goes live and instantly redeems channel rewards as soon as they go live.
 
 ![image alt](https://github.com/cyik/twitch-channelreward-redeemer/blob/3bf66e03935e614367610afe6e6da381cc1a9725/UI%20example3.png)
 
