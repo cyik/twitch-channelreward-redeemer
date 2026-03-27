@@ -1,0 +1,15 @@
+# Chrome extension generated files
+_metadata/
+generated_indexed_rulesets/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Git internals
+.git/

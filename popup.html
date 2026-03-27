@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twitch Auto Redeemer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            width: 350px;
+            padding: 16px;
+            margin: 0;
+            background: #111;
+        }
+        .container {
+            padding: 16px;
+            box-shadow: none;
+            border: none;
+            background: #18181b;
+        }
+        header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+        }
+        .status-badge {
+            font-size: 11px;
+            color: #ccc;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 99px;
+            float: right;
+        }
+        .streamer-item {
+            padding: 10px;
+            margin-bottom: 8px;
+        }
+        .footer {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .live-indicator {
+            width: 8px;
+            height: 8px;
+            background: gray;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .live-indicator.active {
+            background: #ff4a4a;
+            box-shadow: 0 0 5px #ff4a4a;
+        }
+        /* Styling for status dot */
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #4CAF50; /* Green for active */
+            margin-right: 5px;
+        }
+        .status-dot.pulsing {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="title-row">
+                <h1>Auto Redeemer</h1>
+                <div class="activity-indicator">
+                    <span class="status-dot pulsing"></span>
+                    <span class="status-text">Active</span>
+                </div>
+            </div>
+            <p id="activeCount">0 Tracked</p>
+        </header>
+
+        <div id="statusList" class="status-list"></div>
+
+        <div class="history-section">
+            <h3>Recent History</h3>
+            <div id="historyList" class="history-list">
+                <!-- History items will be injected here -->
+            </div>
+        </div>
+
+        <div class="footer">
+            <button id="refreshBtn" class="btn btn-secondary btn-sm">Refresh</button>
+            <a href="options.html" target="_blank" class="btn btn-primary btn-sm">Settings</a>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>

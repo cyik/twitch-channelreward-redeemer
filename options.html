@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twitch Auto-Redeemer Setup</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Extension Setup</h1>
+            <p>Follow these 3 simple steps to get started</p>
+        </header>
+
+        <main>
+            <!-- Step 1: IDs -->
+            <section class="card">
+                <h3>Step 1: Enter your Application ID</h3>
+                <p class="helper-text">This is the "Client ID" from your Twitch Developer Console.</p>
+                <div class="form-group">
+                    <input type="text" id="clientId" placeholder="Paste your Application ID here">
+                </div>
+
+                <h3>Step 2: Enter your Security Link</h3>
+                <p class="helper-text">Make sure this link matches the "Redirect URL" in your Twitch settings.</p>
+                <div class="form-group">
+                    <div class="input-with-button">
+                        <input type="text" id="redirectUrl" placeholder="e.g. http://localhost">
+                        <button id="useDefaultUrl" class="btn-small">Auto-Fill</button>
+                    </div>
+                </div>
+                
+                <hr class="mt-20 mb-20">
+
+                <h3>Step 3: Connect to Twitch</h3>
+                <button id="loginTwitch" class="btn-primary">Connect My Account</button>
+                <div id="authStatus" class="auth-status mt-10">Status: Not Connected</div>
+                
+                <hr class="mt-20 mb-20">
+                
+                <h3>Advanced: Check Frequency</h3>
+                <p class="helper-text">How often to check if your streamers are live (seconds). 15 is recommended.</p>
+                <div class="form-group">
+                    <input type="number" id="checkInterval" min="5" max="3600" placeholder="e.g. 15">
+                </div>
+                <button id="saveInterval" class="btn-secondary">Update Interval</button>
+            </section>
+
+            <!-- Manual Fallback -->
+            <section class="card secondary">
+                <h3>Alternative: Manual Connection</h3>
+                <p class="helper-text">If the button above doesn't work, paste your Connection Key here.</p>
+                <div class="form-group">
+                    <input type="password" id="manualToken" placeholder="Paste Connection Key here">
+                </div>
+                <button id="saveManual" class="btn-secondary">Save Manually</button>
+            </section>
+
+            <!-- Managed Streamers -->
+            <section class="card">
+                <h3>Add Streamers to Watch</h3>
+                <div class="streamer-input">
+                    <input type="text" id="streamerLogin" placeholder="Twitch Username">
+                    <button id="addStreamer" class="btn-primary">Add</button>
+                </div>
+                <div id="streamerList" class="streamer-list mt-20"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Settings saved locally. No passwords shared.</p>
+        </footer>
+    </div>
+
+    <!-- Reward Selection Modal -->
+    <div id="rewardModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Select Reward</h3>
+            <p>Pick the reward you want to auto-redeem.</p>
+            <div id="rewardList" class="reward-list"></div>
+            <button id="closeModal" class="btn-secondary mt-20">Cancel</button>
+        </div>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Twitch Auto Redeemer",
+  "version": "1.0",
+  "description": "Automatically redeems Twitch channel rewards when a streamer goes live.",
+  "permissions": [
+    "alarms",
+    "storage",
+    "notifications",
+    "declarativeNetRequest",
+    "identity",
+    "cookies"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [{
+      "id": "ruleset_1",
+      "enabled": true,
+      "path": "rules.json"
+    }]
+  },
+  "host_permissions": [
+    "https://api.twitch.tv/*",
+    "https://gql.twitch.tv/*",
+    "https://www.twitch.tv/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
+  }
+}

@@ -1,0 +1,353 @@
+:root {
+    --primary: #9146ff;
+    --primary-hover: #772ce8;
+    --bg: #0e0e10;
+    --card-bg: #18181b;
+    --text: #efeff1;
+    --text-muted: #adadb8;
+    --success: #00f593;
+    --danger: #eb0400;
+    --border: #26262c;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+}
+
+.container {
+    max-width: 500px;
+    width: 100%;
+}
+
+header {
+    margin-bottom: 30px;
+}
+
+h1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+header p {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 20px;
+}
+
+.card.secondary {
+    border-style: dashed;
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.helper-text {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+}
+
+input {
+    width: 100%;
+    background-color: #000;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 10px 12px;
+    font-size: 14px;
+}
+
+input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.input-with-button {
+    display: flex;
+    gap: 8px;
+}
+
+.input-with-button input {
+    flex: 1;
+}
+
+.btn-small {
+    padding: 0 12px;
+    font-size: 11px;
+    background-color: #26262a;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.btn-small:hover {
+    background-color: #323236;
+}
+
+.btn-primary {
+    display: block;
+    width: 100%;
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-hover);
+}
+
+.btn-secondary {
+    background-color: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.btn-secondary:hover {
+    background-color: #26262c;
+}
+
+.auth-status {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.streamer-input {
+    display: flex;
+    gap: 8px;
+}
+
+.streamer-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #000;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+}
+
+.streamer-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.streamer-info h4 {
+    font-size: 14px;
+}
+
+.streamer-info p {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.btn-delete {
+    background: none;
+    border: none;
+    color: var(--danger);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+
+.btn-delete:hover {
+    text-decoration: underline;
+}
+
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+body.modal-open {
+    overflow: hidden;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-content {
+    background-color: var(--card-bg);
+    padding: 30px;
+    border-radius: 12px;
+    max-width: 400px;
+    width: 90%;
+    border: 1px solid var(--border);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.reward-list {
+    overflow-y: auto;
+    flex: 1;
+    margin-top: 15px;
+    padding-right: 10px;
+}
+
+.reward-item {
+    background-color: #000;
+    padding: 12px;
+    margin-top: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    border: 1px solid transparent;
+}
+
+.reward-item:hover {
+    border-color: var(--primary);
+}
+
+.reward-item .cost {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.mt-10 { margin-top: 10px; }
+.mt-20 { margin-top: 20px; }
+.mb-20 { margin-bottom: 20px; }
+hr { border: none; border-top: 1px solid var(--border); }
+
+/* --- History Section --- */
+.history-section {
+    margin-top: 20px;
+    border-top: 1px solid var(--border);
+    padding-top: 15px;
+}
+
+.history-section h3 {
+    font-size: 13px;
+    color: var(--primary);
+    margin-bottom: 10px;
+}
+
+.history-list {
+    max-height: 200px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.history-item {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 8px;
+    font-size: 11px;
+    border-left: 2px solid #666;
+}
+
+.history-item.success { border-left-color: var(--success); }
+.history-item.failed { border-left-color: var(--error); }
+
+.history-main {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.history-status {
+    padding: 2px 4px;
+    border-radius: 2px;
+    font-size: 9px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.history-status.success {
+    background: rgba(76, 175, 80, 0.2);
+    color: var(--success);
+}
+
+.history-status.failed {
+    background: rgba(255, 74, 74, 0.2);
+    color: var(--error);
+}
+
+.history-details {
+    color: #888;
+    font-size: 10px;
+}
+
+.history-error {
+    color: var(--error);
+    font-size: 10px;
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.activity-indicator {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: #888;
+}
