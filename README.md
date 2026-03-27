@@ -1,12 +1,12 @@
 # Twitch Auto Redeemer Extension
 
-A premium Chrome extension that monitors your favorite Twitch streamers and automatically redeems channel point rewards as soon as they go live.
+A lightweight browser extension that monitors when Twitch chaannel goes live and instantly redeems channel rewards as soon as they go live.
 
 ## Features
-- **Auto-Detection**: Periodic checking (default: 5 mins) of streamer live status.
+- **Auto-Detection**: Periodic checking (default: 5 mins) of streamer live status, can be set to whatever you like.
 - **Auto-Redeem**: Instantly triggers a specific channel point reward upon stream start.
 - **Smart Tracking**: Remembers the last live status to prevent multiple redemptions within the same session.
-- **Premium UI**: Modern dark-mode interface with translucent glassmorphism effects.
+
 
 ## Setup Instructions
 
