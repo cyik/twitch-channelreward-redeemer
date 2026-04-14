@@ -21,12 +21,21 @@ let accessToken = "";
 
 const saveIntervalBtn = document.getElementById('saveInterval');
 const checkIntervalInput = document.getElementById('checkInterval');
+const realTimeModeInput = document.getElementById('realTimeMode');
+const autoClaimBonusInput = document.getElementById('autoClaimBonus');
 
 // Initial Load
 document.addEventListener('DOMContentLoaded', () => {
-    chrome.storage.local.get(['clientId', 'accessToken', 'streamers', 'redirectUrl', 'checkInterval'], async (data) => {
+    chrome.storage.local.get(['clientId', 'accessToken', 'streamers', 'redirectUrl', 'checkInterval', 'realTimeMode', 'autoClaimBonus'], async (data) => {
         if (data.clientId) clientIdInput.value = data.clientId;
         if (data.accessToken) manualTokenInput.value = data.accessToken;
+        if (data.realTimeMode !== undefined) realTimeModeInput.checked = data.realTimeMode;
+        
+        if (data.autoClaimBonus !== undefined) {
+            autoClaimBonusInput.checked = data.autoClaimBonus;
+        } else {
+            autoClaimBonusInput.checked = true;
+        }
         
         let defaultRedirect = "";
         try {
@@ -47,13 +56,16 @@ document.addEventListener('DOMContentLoaded', () => {
             accessToken = data.accessToken;
             const isValid = await validateToken(accessToken, data.clientId);
             if (isValid) {
-                authStatusEl.textContent = "✓ Connected to Twitch";
+                // Determine the correct connection message
+                const msg = data.connectionType === 'manual' ? "✓ Connected Manually (Saved)" : "✓ Connected to Twitch (Saved)";
+                authStatusEl.textContent = msg;
                 authStatusEl.style.color = "var(--success)";
+                
+                // Add a permanent 'Saved' indicator to the input field itself for peace of mind
+                manualTokenInput.placeholder = "Key is saved and active";
             } else {
                 authStatusEl.textContent = "⚠ Connection Expired - Please Log in again";
                 authStatusEl.style.color = "var(--warning)";
-                // Don't clear storage automatically to avoid losing settings, 
-                // but mark as invalid
             }
         } else {
             authStatusEl.textContent = "✕ Not Connected";
@@ -83,15 +95,33 @@ useDefaultUrlBtn.addEventListener('click', () => {
 
 saveIntervalBtn.addEventListener('click', () => {
     const interval = parseInt(checkIntervalInput.value);
+    const realTime = realTimeModeInput.checked;
+    
     if (isNaN(interval) || interval < 5) {
-        alert('Too Fast: Please enter 5 seconds or more to avoid being blocked by Twitch.');
+        alert('Too Fast: Please enter 5 seconds or more for Polling mode.');
         return;
     }
 
-    chrome.storage.local.set({ checkInterval: interval }, () => {
+    chrome.storage.local.set({ 
+        checkInterval: interval,
+        realTimeMode: realTime
+    }, () => {
         chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
-        alert(`Success: Check frequency updated to every ${interval} seconds.`);
+        alert(`Settings Saved! Mode: ${realTime ? 'Real-time' : 'Polling'}`);
     });
+});
+
+realTimeModeInput.addEventListener('change', () => {
+    const realTime = realTimeModeInput.checked;
+    chrome.storage.local.set({ realTimeMode: realTime }, () => {
+        chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
+        // Subtle notification check
+        console.log("Real-time mode updated to:", realTime);
+    });
+});
+
+autoClaimBonusInput.addEventListener('change', () => {
+    chrome.storage.local.set({ autoClaimBonus: autoClaimBonusInput.checked });
 });
 
 saveManualBtn.addEventListener('click', () => {
@@ -105,10 +135,11 @@ saveManualBtn.addEventListener('click', () => {
     }
 
     accessToken = token;
-    chrome.storage.local.set({ clientId, accessToken: token, redirectUrl }, () => {
-        authStatusEl.textContent = "✓ Connected Manually";
+    chrome.storage.local.set({ clientId, accessToken: token, redirectUrl, connectionType: 'manual' }, () => {
+        authStatusEl.textContent = "✓ Connected Manually (Saved)";
         authStatusEl.style.color = "var(--success)";
-        alert('Keys saved! You are now connected.');
+        manualTokenInput.placeholder = "Key is saved and active";
+        alert('Credentials Saved Permanently! You are now connected and can close this page.');
     });
 });
 
@@ -156,12 +187,12 @@ loginTwitchBtn.addEventListener('click', () => {
             const token = params.get('access_token');
             if (token) {
                 accessToken = token;
-                chrome.storage.local.set({ accessToken: token }, async () => {
+                chrome.storage.local.set({ accessToken: token, connectionType: 'automatic' }, async () => {
                     const isValid = await validateToken(token, clientId);
                     if (isValid) {
-                        authStatusEl.textContent = "✓ Connected to Twitch";
+                        authStatusEl.textContent = "✓ Connected to Twitch (Saved)";
                         authStatusEl.style.color = "var(--success)";
-                        alert('Successfully connected to Twitch!');
+                        alert('Log in successful! Your connection is saved and active.');
                     } else {
                         alert('Security Warning: Login completed, but the token failed verification. Please double check your Client ID.');
                     }
@@ -194,10 +225,7 @@ addStreamerBtn.addEventListener('click', async () => {
 
     try {
         const rewards = await fetchChannelRewards(login);
-        if (rewards.length === 0) {
-            alert('No Rewards Found: This streamer has no custom point rewards available.');
-            return;
-        }
+        // Do not block if no rewards, they might want to just watch the stream.
         pendingStreamer = { login };
         showRewardModal(login, rewards);
     } catch (e) {
@@ -264,10 +292,27 @@ function renderStreamerList() {
         div.innerHTML = `
             <div class="streamer-info">
                 <h4>${s.login}</h4>
-                <p>${s.rewardTitle}</p>
+                <p>${s.rewardTitle || 'No Reward Selected'}</p>
+                <div class="streamer-toggles" style="display: flex; gap: 18px; margin-top: 10px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <label class="switch" style="transform: scale(0.8); margin: 0; transform-origin: left center;">
+                            <input type="checkbox" class="toggle-redeem" data-index="${index}" ${s.enableRedeem !== false && s.rewardId ? 'checked' : ''} ${!s.rewardId ? 'disabled' : ''}>
+                            <span class="slider"></span>
+                        </label>
+                        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Auto-Redeem</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <label class="switch" style="transform: scale(0.8); margin: 0; transform-origin: left center;">
+                            <input type="checkbox" class="toggle-watch" data-index="${index}" ${s.enableWatch !== false ? 'checked' : ''}>
+                            <span class="slider"></span>
+                        </label>
+                        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Auto-Watch</span>
+                    </div>
+                </div>
             </div>
-            <div class="streamer-actions">
-                <button class="btn-small btn-test" data-index="${index}">Test</button>
+            <div class="streamer-actions" style="display: flex; gap: 8px;">
+                <button class="btn-small btn-test" data-index="${index}">Test Redeem</button>
+                <button class="btn-small btn-test-watch" data-index="${index}">Test Watch</button>
                 <button class="btn-delete" data-index="${index}">Delete</button>
             </div>
         `;
@@ -292,7 +337,29 @@ function renderStreamerList() {
             } catch (err) {
                 alert('Test Failed: ' + err.message);
             } finally {
-                e.target.textContent = 'Test';
+                e.target.textContent = 'Test Redeem';
+                e.target.disabled = false;
+            }
+        });
+    });
+
+    document.querySelectorAll('.btn-test-watch').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const index = e.target.dataset.index;
+            const s = currentStreamers[index];
+            e.target.textContent = 'Opening...';
+            e.target.disabled = true;
+
+            try {
+                await chrome.runtime.sendMessage({ 
+                    type: 'TEST_WATCH', 
+                    streamerLogin: s.login 
+                });
+                // Alert isn't needed here since background script creates a notification
+            } catch (err) {
+                alert('Test Watch Failed: ' + err.message);
+            } finally {
+                e.target.textContent = 'Test Watch';
                 e.target.disabled = false;
             }
         });
@@ -301,7 +368,30 @@ function renderStreamerList() {
     document.querySelectorAll('.btn-delete').forEach(btn => {
         btn.addEventListener('click', (e) => {
             currentStreamers.splice(e.target.dataset.index, 1);
-            chrome.storage.local.set({ streamers: currentStreamers }, renderStreamerList);
+            chrome.storage.local.set({ streamers: currentStreamers }, () => {
+                renderStreamerList();
+                chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
+            });
+        });
+    });
+
+    document.querySelectorAll('.toggle-redeem').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const index = e.target.dataset.index;
+            currentStreamers[index].enableRedeem = e.target.checked;
+            chrome.storage.local.set({ streamers: currentStreamers }, () => {
+                chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
+            });
+        });
+    });
+
+    document.querySelectorAll('.toggle-watch').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const index = e.target.dataset.index;
+            currentStreamers[index].enableWatch = e.target.checked;
+            chrome.storage.local.set({ streamers: currentStreamers }, () => {
+                chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
+            });
         });
     });
 }
@@ -309,6 +399,31 @@ function renderStreamerList() {
 function showRewardModal(login, rewards) {
     document.body.classList.add('modal-open');
     rewardListEl.innerHTML = '';
+
+    const noRewardItem = document.createElement('div');
+    noRewardItem.className = 'reward-item';
+    noRewardItem.innerHTML = `<span style="font-weight: bold; color: var(--primary);">Watch Streak Only (No Reward)</span><span></span>`;
+    noRewardItem.addEventListener('click', () => {
+        const newStreamer = {
+            login,
+            rewardId: null,
+            rewardTitle: "Watch Streak Only",
+            rewardCost: 0,
+            lastLiveStatus: false,
+            enableRedeem: false,
+            enableWatch: true
+        };
+        currentStreamers.push(newStreamer);
+        chrome.storage.local.set({ streamers: currentStreamers }, () => {
+            renderStreamerList();
+            rewardModal.classList.add('hidden');
+            document.body.classList.remove('modal-open');
+            streamerLoginInput.value = '';
+            chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
+        });
+    });
+    rewardListEl.appendChild(noRewardItem);
+
     rewards.forEach(reward => {
         const div = document.createElement('div');
         div.className = 'reward-item';
@@ -319,7 +434,9 @@ function showRewardModal(login, rewards) {
                 rewardId: reward.id,
                 rewardTitle: reward.title,
                 rewardCost: reward.cost,
-                lastLiveStatus: false
+                lastLiveStatus: false,
+                enableRedeem: true,
+                enableWatch: true
             };
             currentStreamers.push(newStreamer);
             chrome.storage.local.set({ streamers: currentStreamers }, () => {
@@ -327,6 +444,7 @@ function showRewardModal(login, rewards) {
                 rewardModal.classList.add('hidden');
                 document.body.classList.remove('modal-open');
                 streamerLoginInput.value = '';
+                chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
             });
         });
         rewardListEl.appendChild(div);

@@ -45,7 +45,37 @@
                 <div class="form-group">
                     <input type="number" id="checkInterval" min="5" max="3600" placeholder="e.g. 15">
                 </div>
-                <button id="saveInterval" class="btn-secondary">Update Interval</button>
+                
+                <button id="saveInterval" class="btn-secondary">Update Polling Speed</button>
+
+                <!-- Premium Real-time Toggle -->
+                <div class="card premium">
+                    <div class="toggle-container">
+                        <div class="toggle-info">
+                            <h4>Real-time Sniping Mode</h4>
+                            <p>Use WebSockets for instant detection (< 0.5s reaction time).</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="realTimeMode">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+            </section>
+
+            <!-- Auto-Claim Feature -->
+            <section class="card">
+                <div class="toggle-container mt-10">
+                    <div class="toggle-info">
+                        <h4>Auto-Claim Bonus Points</h4>
+                        <p>Automatically collect bonus points (green box). </p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="autoClaimBonus">
+                        <span class="slider"></span>
+                    </label>
+                </div>
             </section>
 
             <!-- Manual Fallback -->
