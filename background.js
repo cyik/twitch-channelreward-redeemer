@@ -194,17 +194,25 @@ async function _doCheckStreamersAndRedeem(forceRedeem, forceLogin) {
                 if (streamer.enableWatch !== false && !forceRedeem) {
                     try {
                         const url = `https://www.twitch.tv/${streamer.login}`;
+                        // We avoid "minimized" because Chrome freezes those tabs, stopping the watch streak.
+                        // Instead, we open a small, unfocused window.
                         const win = await chrome.windows.create({ 
                             url: url, 
-                            state: "minimized", 
+                            state: "normal", 
                             focused: false,
+                            width: 400,
+                            height: 300,
                             type: "popup"
                         });
-                        // Fallback: If creation didn't minimize it, force it now
+
+                        // Attempt to push it into the background by focusing the current window
                         try {
-                            await chrome.windows.update(win.id, { state: "minimized" });
+                            const currentWin = await chrome.windows.getCurrent();
+                            if (currentWin) {
+                                await chrome.windows.update(currentWin.id, { focused: true });
+                            }
                         } catch (e) {
-                            console.log("[Watch Streak] Could not force minimize:", e);
+                            console.log("[Watch Streak] Could not restore focus:", e);
                         }
 
                         // Track Browser Open Event
@@ -408,16 +416,21 @@ async function testWatchStreak(login) {
         const url = `https://www.twitch.tv/${login}`;
         const win = await chrome.windows.create({ 
             url: url, 
-            state: "minimized", 
+            state: "normal", 
             focused: false,
+            width: 400,
+            height: 300,
             type: "popup"
         });
         
-        // Fallback: If creation didn't minimize it, force it now
+        // Attempt to push it into the background
         try {
-            await chrome.windows.update(win.id, { state: "minimized" });
+            const currentWin = await chrome.windows.getCurrent();
+            if (currentWin) {
+                await chrome.windows.update(currentWin.id, { focused: true });
+            }
         } catch (e) {
-            console.log("[Watch Streak Test] Could not force minimize:", e);
+            console.log("[Watch Streak Test] Could not restore focus:", e);
         }
 
         try {
