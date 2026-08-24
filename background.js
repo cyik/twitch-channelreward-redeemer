@@ -46,6 +46,15 @@ async function _loadAndSchedule() {
     if (result.streamers) settings.streamers = result.streamers;
     settings.realTimeMode = true; // Always true now
 
+    try {
+        const streaks = await fetchWatchStreaks();
+        if (streaks && Object.keys(streaks).length > 0) {
+            await chrome.storage.local.set({ watchStreaks: streaks });
+        }
+    } catch (e) {
+        console.warn("[Watch Streak] Failed initial fetch:", e);
+    }
+
     // Clear any existing schedules/sockets
     chrome.alarms.clear(ALARM_NAME);
     chrome.alarms.clear(KEEP_ALIVE_ALARM);
@@ -455,13 +464,60 @@ async function redeemReward(streamer, backupToken, providedUserId = null) {
     return json.data?.redeemCustomReward?.redemption || { status: "FULFILLED" };
 }
 
+async function fetchWatchStreaks() {
+    const cookieToken = await getAuthToken();
+    const activeToken = cookieToken || settings.accessToken;
+    if (!activeToken) return {};
+
+    try {
+        const response = await fetch(TWITCH_GQL_URL, {
+            method: "POST",
+            headers: {
+                "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+                "Authorization": `OAuth ${activeToken}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                operationName: "BatchGetWatchStreaks",
+                variables: {},
+                extensions: {
+                    persistedQuery: {
+                        version: 1,
+                        sha256Hash: "9a0e9c40573c4104b073db9261c116dbb1771732140cdde4181002019d41adce"
+                    }
+                }
+            })
+        });
+
+        const json = await response.json();
+        const streaks = json.data?.batchGetWatchStreaks || [];
+        const streakMap = {};
+        streaks.forEach(s => {
+            const login = s.channel?.owner?.login;
+            if (login) {
+                streakMap[login.toLowerCase()] = {
+                    value: s.value || 0,
+                    achievedAt: s.achievedAt || null,
+                    state: s.state || "ACTIVE"
+                };
+            }
+        });
+        return streakMap;
+    } catch (e) {
+        console.warn("[Watch Streak] Failed to fetch streaks:", e);
+        return {};
+    }
+}
+
 async function testWatchStreak(login) {
     const win = await openWatchWindow(login);
-    chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: "Test Watch Streak", message: `Background window opened for ${login}.` });
+    chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: "Smart Watch Streak", message: `Monitoring watch streak for ${login}. Window will close automatically when streak increments!` });
 }
 
 async function openWatchWindow(login) {
-    const win = await chrome.windows.create({ url: `https://www.twitch.tv/${login}`, state: "normal", focused: true, width: 800, height: 400, type: "popup" });
+    const cleanLogin = login.toLowerCase().trim();
+    const win = await chrome.windows.create({ url: `https://www.twitch.tv/${cleanLogin}`, state: "normal", focused: true, width: 800, height: 400, type: "popup" });
+    
     try {
         const currentWin = await chrome.windows.getCurrent();
         if (currentWin) await chrome.windows.update(currentWin.id, { focused: true });
@@ -469,6 +525,53 @@ async function openWatchWindow(login) {
     try {
         if (win.tabs && win.tabs.length > 0) await chrome.tabs.update(win.tabs[0].id, { muted: true });
     } catch (e) {}
-    chrome.alarms.create(`closeWindow_${win.id}_${Date.now()}`, { delayInMinutes: 20 });
+
+    // Smart Watch Streak Verification Loop
+    startSmartStreakMonitor(cleanLogin, win.id);
+
     return win;
+}
+
+async function startSmartStreakMonitor(login, windowId) {
+    const initialStreaks = await fetchWatchStreaks();
+    const initialData = initialStreaks[login] || { value: 0, achievedAt: null };
+    const startTime = Date.now();
+    const MAX_WATCH_TIME_MS = 10 * 60 * 1000; // 10 minutes max timeout
+
+    console.log(`[Smart Streak] Started monitoring ${login}. Initial streak: ${initialData.value}, achievedAt: ${initialData.achievedAt}`);
+
+    const intervalId = setInterval(async () => {
+        const elapsed = Date.now() - startTime;
+        if (elapsed > MAX_WATCH_TIME_MS) {
+            clearInterval(intervalId);
+            console.log(`[Smart Streak] Timeout reached (10 min) for ${login}. Closing window ${windowId}.`);
+            chrome.windows.remove(windowId).catch(() => {});
+            return;
+        }
+
+        const currentStreaks = await fetchWatchStreaks();
+        const currentData = currentStreaks[login];
+
+        if (currentData) {
+            const valueIncreased = currentData.value > initialData.value;
+            const timestampUpdated = currentData.achievedAt && currentData.achievedAt !== initialData.achievedAt;
+
+            if (valueIncreased || timestampUpdated) {
+                clearInterval(intervalId);
+                console.log(`[Smart Streak] 🎉 Streak verified & updated for ${login}! New streak: ${currentData.value}. Closing window.`);
+                
+                // Update local storage streaks cache
+                chrome.storage.local.set({ watchStreaks: currentStreaks });
+
+                chrome.notifications.create({
+                    type: "basic",
+                    iconUrl: "icons/icon128.png",
+                    title: "🔥 Watch Streak Incremented!",
+                    message: `Watch streak for ${login} is now ${currentData.value}! Watch window closed.`
+                });
+
+                chrome.windows.remove(windowId).catch(() => {});
+            }
+        }
+    }, 15000); // Check every 15 seconds
 }

@@ -265,6 +265,7 @@ async function fetchChannelRewards(login) {
         }
 
         const json = await response.json();
+        console.log("[Twitch GQL Response]:", json.data?.channel);
         if (json.errors) {
             console.warn("GQL returned errors:", json.errors);
         }
@@ -278,22 +279,38 @@ async function fetchChannelRewards(login) {
 }
 
 function renderStreamerList() {
+    chrome.storage.local.get(['watchStreaks'], (data) => {
+        _renderStreamerListSync(data.watchStreaks || {});
+    });
+}
+
+function _renderStreamerListSync(streaks) {
     streamerListEl.innerHTML = '';
     currentStreamers.forEach((s, index) => {
-        const div = document.createElement('div');
-        div.className = 'streamer-item';
-        div.draggable = true;
-        div.dataset.index = index;
+            const div = document.createElement('div');
+            div.className = 'streamer-item';
+            div.draggable = true;
+            div.dataset.index = index;
 
-        div.innerHTML = `
-            <div class="drag-handle">
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
-            <div class="streamer-info">
-                <h4>${s.login}</h4>
-                <p>${s.rewardTitle || 'No Reward Selected'}</p>
+            const streakData = streaks[s.login.toLowerCase()];
+            const streakCount = streakData ? streakData.value : null;
+
+            div.innerHTML = `
+                <div class="drag-handle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <div class="streamer-info">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <h4>${s.login}</h4>
+                        ${streakCount !== null ? `
+                            <span class="streak-badge" title="Watch Streak Count" style="background: rgba(2, 2, 2, 0.15); color: #ff8c00; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; border: 1px solid rgba(255, 140, 0, 0.3); display: inline-flex; align-items: center; gap: 3px;">
+                                🔥 ${streakCount} Streak${streakCount === 1 ? '' : 's'}
+                            </span>
+                        ` : ''}
+                    </div>
+                    <p>${s.rewardTitle || 'No Reward Selected'}</p>
                 ${s.rewardId && s.userInput !== undefined && s.userInput !== null ? `
                     <div class="mt-5">
                         <input type="text" class="edit-user-input" data-index="${index}" value="${s.userInput}" placeholder="Message required..." style="font-size: 11px; padding: 4px 8px; background: rgba(255,255,255,0.05); border-color: var(--border);">
