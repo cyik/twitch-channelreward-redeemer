@@ -7,6 +7,7 @@
     --text-muted: #adadb8;
     --success: #00f593;
     --danger: #eb0400;
+    --warning: #ffb700;
     --border: #26262c;
 }
 
@@ -169,18 +170,80 @@ input:focus {
 
 .streamer-item {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     background-color: #000;
-    padding: 12px;
+    padding: 10px 14px;
     border-radius: 6px;
     border: 1px solid var(--border);
     margin-bottom: 8px;
+    cursor: grab;
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    user-select: none;
+    position: relative;
+    gap: 12px;
+}
+
+.drag-handle {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px;
+    opacity: 0.3;
+    transition: opacity 0.2s;
+}
+
+.streamer-item:hover .drag-handle {
+    opacity: 0.8;
+}
+
+.drag-handle span {
+    width: 3px;
+    height: 3px;
+    background-color: var(--text);
+    border-radius: 50%;
+    display: block;
+    box-shadow: 6px 0 var(--text); /* Creates the double row of dots */
+}
+
+.streamer-info {
+    flex: 1;
+}
+
+.streamer-item.dragging {
+    opacity: 0.5;
+    transform: scale(0.98);
+    border-color: var(--primary);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+}
+
+.streamer-item.drag-over {
+    border-top: 2px solid var(--primary);
+}
+
+.streamer-item.drag-over-bottom {
+    border-bottom: 2px solid var(--primary);
 }
 
 .streamer-actions {
     display: flex;
     gap: 8px;
+}
+
+.validation-error {
+    color: var(--danger);
+    font-size: 11px;
+    margin-top: 5px;
+    font-weight: 600;
+    display: none;
+}
+
+.validation-error.active {
+    display: block;
+}
+
+.reward-item input:focus {
+    outline: 2px solid var(--primary);
+    border-color: transparent;
 }
 
 .streamer-info h4 {

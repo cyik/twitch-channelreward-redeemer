@@ -19,9 +19,6 @@ let currentStreamers = [];
 let pendingStreamer = null;
 let accessToken = "";
 
-const saveIntervalBtn = document.getElementById('saveInterval');
-const checkIntervalInput = document.getElementById('checkInterval');
-const realTimeModeInput = document.getElementById('realTimeMode');
 const autoClaimBonusInput = document.getElementById('autoClaimBonus');
 
 // Initial Load
@@ -29,14 +26,13 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get(['clientId', 'accessToken', 'streamers', 'redirectUrl', 'checkInterval', 'realTimeMode', 'autoClaimBonus'], async (data) => {
         if (data.clientId) clientIdInput.value = data.clientId;
         if (data.accessToken) manualTokenInput.value = data.accessToken;
-        if (data.realTimeMode !== undefined) realTimeModeInput.checked = data.realTimeMode;
-        
+
         if (data.autoClaimBonus !== undefined) {
             autoClaimBonusInput.checked = data.autoClaimBonus;
         } else {
             autoClaimBonusInput.checked = true;
         }
-        
+
         let defaultRedirect = "";
         try {
             if (chrome.identity && chrome.identity.getRedirectURL) {
@@ -54,29 +50,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (data.accessToken && data.clientId) {
             accessToken = data.accessToken;
-            const isValid = await validateToken(accessToken, data.clientId);
-            if (isValid) {
-                // Determine the correct connection message
-                const msg = data.connectionType === 'manual' ? "✓ Connected Manually (Saved)" : "✓ Connected to Twitch (Saved)";
-                authStatusEl.textContent = msg;
+
+            if (data.connectionType === 'manual') {
+                // For manual connections, we trust the saved token on startup 
+                // because it might be a cookie token that fails OAuth validation.
+                authStatusEl.textContent = "✓ Connected Manually (Saved)";
                 authStatusEl.style.color = "var(--success)";
-                
-                // Add a permanent 'Saved' indicator to the input field itself for peace of mind
                 manualTokenInput.placeholder = "Key is saved and active";
             } else {
-                authStatusEl.textContent = "⚠ Connection Expired - Please Log in again";
-                authStatusEl.style.color = "var(--warning)";
+                // For automatic OAuth connections, we perform a quick validation
+                const isValid = await validateToken(accessToken, data.clientId);
+                if (isValid) {
+                    authStatusEl.textContent = "✓ Connected to Twitch (Saved)";
+                    authStatusEl.style.color = "var(--success)";
+                    manualTokenInput.placeholder = "Key is saved and active";
+                } else {
+                    authStatusEl.textContent = "⚠ Connection Expired - Please Log in again";
+                    authStatusEl.style.color = "var(--warning)";
+                }
             }
         } else {
             authStatusEl.textContent = "✕ Not Connected";
-            authStatusEl.style.color = "var(--error)";
+            authStatusEl.style.color = "var(--danger)";
         }
 
-        if (data.checkInterval) {
-            document.getElementById('checkInterval').value = data.checkInterval;
-        } else {
-            document.getElementById('checkInterval').value = 60;
-        }
+
 
         if (data.streamers) {
             currentStreamers = data.streamers;
@@ -93,35 +91,9 @@ useDefaultUrlBtn.addEventListener('click', () => {
     redirectUrlInput.value = chrome.identity.getRedirectURL();
 });
 
-saveIntervalBtn.addEventListener('click', () => {
-    const interval = parseInt(checkIntervalInput.value);
-    const realTime = realTimeModeInput.checked;
-    
-    if (isNaN(interval) || interval < 5) {
-        alert('Too Fast: Please enter 5 seconds or more for Polling mode.');
-        return;
-    }
 
-    chrome.storage.local.set({ 
-        checkInterval: interval,
-        realTimeMode: realTime
-    }, () => {
-        chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
-        alert(`Settings Saved! Mode: ${realTime ? 'Real-time' : 'Polling'}`);
-    });
-});
-
-realTimeModeInput.addEventListener('change', () => {
-    const realTime = realTimeModeInput.checked;
-    chrome.storage.local.set({ realTimeMode: realTime }, () => {
-        chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
-        // Subtle notification check
-        console.log("Real-time mode updated to:", realTime);
-    });
-});
-
-autoClaimBonusInput.addEventListener('change', () => {
-    chrome.storage.local.set({ autoClaimBonus: autoClaimBonusInput.checked });
+autoClaimBonusInput.addEventListener('change', (e) => {
+    chrome.storage.local.set({ autoClaimBonus: e.target.checked });
 });
 
 saveManualBtn.addEventListener('click', () => {
@@ -203,6 +175,7 @@ loginTwitchBtn.addEventListener('click', () => {
 });
 
 async function validateToken(token, clientId) {
+    if (!token || !clientId) return false;
     try {
         const response = await fetch("https://id.twitch.tv/oauth2/validate", {
             headers: { "Authorization": `OAuth ${token}` }
@@ -214,6 +187,8 @@ async function validateToken(token, clientId) {
         return false;
     }
 }
+
+
 
 addStreamerBtn.addEventListener('click', async () => {
     const login = streamerLoginInput.value.trim().toLowerCase();
@@ -234,7 +209,8 @@ addStreamerBtn.addEventListener('click', async () => {
 });
 
 async function fetchChannelRewards(login) {
-    // Stage 1: Try to sync with browser login for maximum reliability
+    const cleanLogin = login.toLowerCase().trim();
+
     const getTwitchCookie = () => {
         return new Promise((resolve) => {
             chrome.cookies.get({ url: "https://www.twitch.tv", name: "auth-token" }, (cookie) => {
@@ -244,44 +220,61 @@ async function fetchChannelRewards(login) {
     };
 
     const cookieToken = await getTwitchCookie();
-    const query = `query GetRewards($login: String!) {
-        channel(name: $login) {
-            id
-            communityPointsSettings {
-                customRewards { id title cost }
-            }
-        }
-    }`;
     const body = {
         operationName: "GetRewards",
-        variables: { login: login.toLowerCase().trim() },
-        query: query
+        variables: { login: cleanLogin },
+        query: `query GetRewards($login: String!) {
+            channel(name: $login) {
+                id
+                communityPointsSettings {
+                    customRewards { id title cost prompt isUserInputRequired }
+                }
+            }
+        }`
     };
 
-    const headers = {
-        "Client-Id": "kimne78kx3ncx6br8ac4hz66l2s7vv", 
-        "Content-Type": "application/json"
+    const makeRequest = async (authToken) => {
+        const headers = {
+            "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+            "Content-Type": "application/json"
+        };
+        if (authToken) {
+            headers["Authorization"] = authToken.startsWith("OAuth ") || authToken.startsWith("Bearer ")
+                ? authToken
+                : `OAuth ${authToken}`;
+        }
+        return await fetch("https://gql.twitch.tv/gql", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(body)
+        });
     };
 
-    if (cookieToken) {
-        headers["Authorization"] = `OAuth ${cookieToken}`;
+    try {
+        let response = await makeRequest(cookieToken);
+
+        // If Twitch returned 401 Unauthorized due to an expired/stale cookieToken, retry without it or with accessToken
+        if (response.status === 401) {
+            console.warn("Cookie token resulted in 401 Unauthorized. Retrying with saved access token / unauthenticated...");
+            response = await makeRequest(accessToken || null);
+        }
+
+        if (!response.ok) {
+            console.warn(`GQL HTTP ${response.status} ${response.statusText}`);
+            return [];
+        }
+
+        const json = await response.json();
+        if (json.errors) {
+            console.warn("GQL returned errors:", json.errors);
+        }
+
+        const rewards = json.data?.channel?.communityPointsSettings?.customRewards;
+        return rewards || [];
+    } catch (e) {
+        console.warn(`Failed to fetch channel rewards for "${cleanLogin}":`, e);
+        return [];
     }
-
-    const response = await fetch("https://gql.twitch.tv/gql", {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(body)
-    });
-
-    const json = await response.json();
-    if (json.errors) throw new Error(json.errors[0].message);
-    
-    const channelData = json.data?.channel;
-    if (!channelData) {
-        throw new Error(`Data is restricted for "${login}". Make sure you are logged into Twitch in this browser.`);
-    }
-
-    return channelData.communityPointsSettings?.customRewards || [];
 }
 
 function renderStreamerList() {
@@ -289,24 +282,39 @@ function renderStreamerList() {
     currentStreamers.forEach((s, index) => {
         const div = document.createElement('div');
         div.className = 'streamer-item';
+        div.draggable = true;
+        div.dataset.index = index;
+
         div.innerHTML = `
+            <div class="drag-handle">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
             <div class="streamer-info">
                 <h4>${s.login}</h4>
                 <p>${s.rewardTitle || 'No Reward Selected'}</p>
+                ${s.rewardId && s.userInput !== undefined && s.userInput !== null ? `
+                    <div class="mt-5">
+                        <input type="text" class="edit-user-input" data-index="${index}" value="${s.userInput}" placeholder="Message required..." style="font-size: 11px; padding: 4px 8px; background: rgba(255,255,255,0.05); border-color: var(--border);">
+                    </div>
+                ` : ''}
                 <div class="streamer-toggles" style="display: flex; gap: 18px; margin-top: 10px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <label class="switch" style="transform: scale(0.8); margin: 0; transform-origin: left center;">
                             <input type="checkbox" class="toggle-redeem" data-index="${index}" ${s.enableRedeem !== false && s.rewardId ? 'checked' : ''} ${!s.rewardId ? 'disabled' : ''}>
                             <span class="slider"></span>
                         </label>
-                        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Auto-Redeem</span>
+                        <span>
+                            <p> Auto-Redeem </p>
+                        </span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <label class="switch" style="transform: scale(0.8); margin: 0; transform-origin: left center;">
                             <input type="checkbox" class="toggle-watch" data-index="${index}" ${s.enableWatch !== false ? 'checked' : ''}>
                             <span class="slider"></span>
                         </label>
-                        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Auto-Watch</span>
+                        <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.5px;">Auto-Watch</span>
                     </div>
                 </div>
             </div>
@@ -317,6 +325,79 @@ function renderStreamerList() {
             </div>
         `;
         streamerListEl.appendChild(div);
+
+        // Drag Events
+        div.addEventListener('dragstart', (e) => {
+            div.classList.add('dragging');
+            e.dataTransfer.setData('text/plain', index);
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
+        div.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+
+            const rect = div.getBoundingClientRect();
+            const midpoint = rect.top + rect.height / 2;
+
+            if (e.clientY < midpoint) {
+                div.classList.add('drag-over');
+                div.classList.remove('drag-over-bottom');
+            } else {
+                div.classList.add('drag-over-bottom');
+                div.classList.remove('drag-over');
+            }
+        });
+
+        div.addEventListener('dragleave', () => {
+            div.classList.remove('drag-over');
+            div.classList.remove('drag-over-bottom');
+        });
+
+        div.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+            let toIndex = parseInt(div.dataset.index);
+
+            div.classList.remove('drag-over');
+            div.classList.remove('drag-over-bottom');
+
+            if (fromIndex === toIndex) return;
+
+            // Determine if we should insert before or after based on mouse position
+            const rect = div.getBoundingClientRect();
+            const isBottom = e.clientY > (rect.top + rect.height / 2);
+
+            // Remove the item from the original list
+            const [draggedItem] = currentStreamers.splice(fromIndex, 1);
+
+            // Re-calculate toIndex because the array has shifted
+            // If we moved an item from above to below, the target index shifts left by 1
+            if (fromIndex < toIndex) {
+                // If we drop on the top half of a later item, it should take that item's place (toIndex - 1)
+                // If we drop on the bottom half, it should go after it (toIndex)
+                if (!isBottom) toIndex--;
+            } else {
+                // If we move from below to above, and drop on bottom half, it goes after (toIndex + 1)
+                if (isBottom) toIndex++;
+            }
+
+            // Insert at the corrected position
+            currentStreamers.splice(toIndex, 0, draggedItem);
+
+            chrome.storage.local.set({ streamers: currentStreamers }, () => {
+                renderStreamerList();
+                chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
+            });
+        });
+
+        div.addEventListener('dragend', () => {
+            div.classList.remove('dragging');
+            document.querySelectorAll('.streamer-item').forEach(el => {
+                el.classList.remove('drag-over');
+                el.classList.remove('drag-over-bottom');
+            });
+        });
     });
 
     document.querySelectorAll('.btn-test').forEach(btn => {
@@ -328,10 +409,12 @@ function renderStreamerList() {
 
             try {
                 // Send message to background to trigger immediate redemption test
-                const response = await chrome.runtime.sendMessage({ 
-                    type: 'CHECK_NOW', 
-                    forceRedeem: true, 
-                    streamerLogin: s.login 
+                const response = await chrome.runtime.sendMessage({
+                    type: 'CHECK_NOW',
+                    forceRedeem: true,
+                    streamerLogin: s.login,
+                    rewardId: s.rewardId,
+                    userInput: s.userInput
                 });
                 alert('Test Signal Sent! Check your Chrome notifications to see if it was successful.');
             } catch (err) {
@@ -351,9 +434,9 @@ function renderStreamerList() {
             e.target.disabled = true;
 
             try {
-                await chrome.runtime.sendMessage({ 
-                    type: 'TEST_WATCH', 
-                    streamerLogin: s.login 
+                await chrome.runtime.sendMessage({
+                    type: 'TEST_WATCH',
+                    streamerLogin: s.login
                 });
                 // Alert isn't needed here since background script creates a notification
             } catch (err) {
@@ -382,6 +465,14 @@ function renderStreamerList() {
             chrome.storage.local.set({ streamers: currentStreamers }, () => {
                 chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
             });
+        });
+    });
+
+    document.querySelectorAll('.edit-user-input').forEach(input => {
+        input.addEventListener('change', (e) => {
+            const index = e.target.dataset.index;
+            currentStreamers[index].userInput = e.target.value.trim();
+            chrome.storage.local.set({ streamers: currentStreamers });
         });
     });
 
@@ -427,13 +518,57 @@ function showRewardModal(login, rewards) {
     rewards.forEach(reward => {
         const div = document.createElement('div');
         div.className = 'reward-item';
-        div.innerHTML = `<span>${reward.title}</span><span class="cost">${reward.cost} pts</span>`;
+        div.innerHTML = `
+            <div style="flex: 1; width: 100%;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong>${reward.title}</strong>
+                    <span class="cost">${reward.cost} pts</span>
+                </div>
+                ${reward.isUserInputRequired ? `
+                    <div class="mt-10" style="width: 100%;">
+                        <input type="text" class="reward-input-field" placeholder="Enter required message..." style="width: 100%;">
+                        <div class="validation-error">Message Required: Please enter a message to auto-redeem this.</div>
+                        <button class="btn-primary btn-small mt-10 select-reward-btn" style="width: 100%;">Select Reward</button>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        // Handle input field focus/click specifically to avoid parent click
+        const inputField = div.querySelector('.reward-input-field');
+        if (inputField) {
+            inputField.addEventListener('click', (e) => e.stopPropagation());
+            inputField.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    div.click();
+                }
+            });
+        }
+
         div.addEventListener('click', () => {
+            let userInput = null;
+            if (reward.isUserInputRequired) {
+                const inputEl = div.querySelector('.reward-input-field');
+                const errorEl = div.querySelector('.validation-error');
+                userInput = inputEl.value.trim();
+
+                if (!userInput) {
+                    // Clear all other active errors first
+                    document.querySelectorAll('.validation-error').forEach(el => el.classList.remove('active'));
+                    errorEl.classList.add('active');
+                    inputEl.focus();
+                    return;
+                }
+            }
+
             const newStreamer = {
                 login,
                 rewardId: reward.id,
                 rewardTitle: reward.title,
                 rewardCost: reward.cost,
+                rewardPrompt: reward.prompt || "",
+                userInput: userInput,
                 lastLiveStatus: false,
                 enableRedeem: true,
                 enableWatch: true

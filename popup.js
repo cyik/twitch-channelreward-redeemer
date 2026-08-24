@@ -5,6 +5,7 @@ const refreshBtn = document.getElementById('refreshBtn');
 document.addEventListener('DOMContentLoaded', () => {
     updateUI();
     initAccordions();
+    refreshBtn.click(); // Auto-refresh on open to ensure newest info visually
 });
 
 // Real-time update if background detects a change while menu is open
@@ -19,9 +20,9 @@ function initAccordions() {
         header.addEventListener('click', () => {
             const content = header.nextElementSibling;
             const arrow = header.querySelector('.arrow');
-            
+
             const isActive = content.classList.contains('active');
-            
+
             // Toggle current
             content.classList.toggle('active');
             arrow.classList.toggle('active');
@@ -35,7 +36,7 @@ refreshBtn.addEventListener('click', async () => {
     refreshBtn.disabled = true;
 
     await chrome.runtime.sendMessage({ type: 'CHECK_NOW' });
-    
+
     setTimeout(() => {
         updateUI();
         refreshBtn.textContent = 'Refresh';
@@ -48,18 +49,26 @@ function updateUI() {
         const streamers = data.streamers || [];
         const history = data.redeemHistory || [];
         const activity = data.activityLog || [];
-        
+
         activeCountEl.textContent = `${streamers.length} Tracked`;
-        
+
         // 1. Update Streamer Status List
         statusListEl.innerHTML = '';
         if (streamers.length === 0) {
             statusListEl.innerHTML = '<p style="text-align: center; color: #666; font-size: 13px; margin: 20px;">No streamers added yet. Go to settings.</p>';
         } else {
-            streamers.forEach(s => {
+            streamers.forEach((s, index) => {
                 const div = document.createElement('div');
                 div.className = 'streamer-item';
+                div.draggable = true;
+                div.dataset.index = index;
+
                 div.innerHTML = `
+                    <div class="drag-handle">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
                     <div class="streamer-info">
                         <h4><span class="live-indicator ${s.lastLiveStatus ? 'active' : ''}"></span>${s.login}</h4>
                         <p style="font-size: 10px; color: #888;">${s.rewardTitle}</p>
@@ -69,6 +78,65 @@ function updateUI() {
                     </span>
                 `;
                 statusListEl.appendChild(div);
+
+                // Drag Events
+                div.addEventListener('dragstart', (e) => {
+                    div.classList.add('dragging');
+                    e.dataTransfer.setData('text/plain', index);
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+
+                div.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    const rect = div.getBoundingClientRect();
+                    const midpoint = rect.top + rect.height / 2;
+                    if (e.clientY < midpoint) {
+                        div.classList.add('drag-over');
+                        div.classList.remove('drag-over-bottom');
+                    } else {
+                        div.classList.add('drag-over-bottom');
+                        div.classList.remove('drag-over');
+                    }
+                });
+
+                div.addEventListener('dragleave', () => {
+                    div.classList.remove('drag-over');
+                    div.classList.remove('drag-over-bottom');
+                });
+
+                div.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                    let toIndex = parseInt(div.dataset.index);
+
+                    div.classList.remove('drag-over');
+                    div.classList.remove('drag-over-bottom');
+                    if (fromIndex === toIndex) return;
+
+                    const rect = div.getBoundingClientRect();
+                    const isBottom = e.clientY > (rect.top + rect.height / 2);
+
+                    const [draggedItem] = streamers.splice(fromIndex, 1);
+                    if (fromIndex < toIndex) {
+                        if (!isBottom) toIndex--;
+                    } else {
+                        if (isBottom) toIndex++;
+                    }
+                    streamers.splice(toIndex, 0, draggedItem);
+
+                    chrome.storage.local.set({ streamers: streamers }, () => {
+                        chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' });
+                    });
+                });
+
+                div.addEventListener('dragend', () => {
+                    div.classList.remove('dragging');
+                    document.querySelectorAll('.streamer-item').forEach(el => {
+                        el.classList.remove('drag-over');
+                        el.classList.remove('drag-over-bottom');
+                    });
+                });
             });
         }
 
@@ -104,7 +172,7 @@ function updateUI() {
             activity.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'activity-item';
-                
+
                 let badgeClass = 'badge-live';
                 let label = 'LIVE';
                 let description = `Streamer ${item.login} detected online.`;
@@ -112,8 +180,8 @@ function updateUI() {
                 if (item.type === 'BROWSER_OPENED') {
                     badgeClass = 'badge-browser';
                     label = 'BROWSER';
-                    description = item.status === 'success' 
-                        ? `Opened watch tab for ${item.login}.` 
+                    description = item.status === 'success'
+                        ? `Opened watch tab for ${item.login}.`
                         : `Failed to open tab for ${item.login}.`;
                 }
 

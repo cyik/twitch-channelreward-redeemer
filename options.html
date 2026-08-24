@@ -40,27 +40,6 @@
                 
                 <hr class="mt-20 mb-20">
                 
-                <h3>Advanced: Check Frequency</h3>
-                <p class="helper-text">How often to check if your streamers are live (seconds). 15 is recommended.</p>
-                <div class="form-group">
-                    <input type="number" id="checkInterval" min="5" max="3600" placeholder="e.g. 15">
-                </div>
-                
-                <button id="saveInterval" class="btn-secondary">Update Polling Speed</button>
-
-                <!-- Premium Real-time Toggle -->
-                <div class="card premium">
-                    <div class="toggle-container">
-                        <div class="toggle-info">
-                            <h4>Real-time Sniping Mode</h4>
-                            <p>Use WebSockets for instant detection (< 0.5s reaction time).</p>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="realTimeMode">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                </div>
                 
             </section>
 
@@ -68,8 +47,12 @@
             <section class="card">
                 <div class="toggle-container mt-10">
                     <div class="toggle-info">
+                        
                         <h4>Auto-Claim Bonus Points</h4>
                         <p>Automatically collect bonus points (green box). </p>
+                    </div>
+                    <div>
+                        <img src="icons/twitchbonuspointsicontransparent.png" alt="bonuspointicon" style="max-width:auto; height: 40px;">
                     </div>
                     <label class="switch">
                         <input type="checkbox" id="autoClaimBonus">
@@ -92,8 +75,8 @@
             <section class="card">
                 <h3>Add Streamers to Watch</h3>
                 <div class="streamer-input">
-                    <input type="text" id="streamerLogin" placeholder="Twitch Username">
-                    <button id="addStreamer" class="btn-primary">Add</button>
+                    <input type="text" id="streamerLogin" placeholder="Insert Twitch Username">
+                    <button id="addStreamer" class="btn-primary">+ Add</button>
                 </div>
                 <div id="streamerList" class="streamer-list mt-20"></div>
             </section>

@@ -1,20 +1,24 @@
-importScripts('eventsub-ws.js');
-
 const TWITCH_GQL_URL = "https://gql.twitch.tv/gql";
 const TWITCH_HELIX_URL = "https://api.twitch.tv/helix";
+const TWITCH_EVENTSUB_WS_URL = "wss://eventsub.wss.twitch.tv/ws";
 const ALARM_NAME = "twitchCheckAlarm";
 const KEEP_ALIVE_ALARM = "wsKeepAlive";
+const EVENTSUB_RECONNECT_ALARM = "eventSubReconnect";
 
 // Default settings
 let settings = {
     clientId: "",
     accessToken: "",
-    checkInterval: 60, 
     streamers: [],
-    realTimeMode: false // Experimental EventSub Mode
+    realTimeMode: true
 };
 
 let checkTimeout = null;
+let eventSubSockets = [];
+let keepAliveTimeout = null;
+let eventSubGeneration = 0;
+let eventSubReconnectDelayMinutes = 0.5;
+let loadPromise = null;
 
 // Initialize
 chrome.runtime.onInstalled.addListener(() => {
@@ -28,48 +32,45 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 async function loadAndSchedule() {
-    const result = await chrome.storage.local.get(["clientId", "accessToken", "checkInterval", "streamers", "realTimeMode"]);
+    if (loadPromise) return loadPromise;
+    loadPromise = _loadAndSchedule().finally(() => {
+        loadPromise = null;
+    });
+    return loadPromise;
+}
+
+async function _loadAndSchedule() {
+    const result = await chrome.storage.local.get(["clientId", "accessToken", "streamers"]);
     if (result.clientId) settings.clientId = result.clientId;
     if (result.accessToken) settings.accessToken = result.accessToken;
-    settings.checkInterval = result.checkInterval || 60;
     if (result.streamers) settings.streamers = result.streamers;
-    settings.realTimeMode = result.realTimeMode || false;
+    settings.realTimeMode = true; // Always true now
 
     // Clear any existing schedules/sockets
-    if (checkTimeout) clearTimeout(checkTimeout);
     chrome.alarms.clear(ALARM_NAME);
     chrome.alarms.clear(KEEP_ALIVE_ALARM);
-    closeEventSub();
+    chrome.alarms.clear(EVENTSUB_RECONNECT_ALARM);
+    closeAllEventSub();
 
-    if (settings.realTimeMode) {
-        console.log("[Manager] REAL-TIME MODE ACTIVE. Disabling polling.");
-        // Create a fast alarm to keep the service worker alive
-        chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 });
-        initEventSub(settings.streamers, settings.accessToken, settings.clientId);
-        // Check current status immediately because EventSub only triggers on new transitions
-        checkStreamersAndRedeem();
-    } else {
-        console.log("[Manager] POLLING MODE ACTIVE. Scheduled for every:", settings.checkInterval, "sec");
-        chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
-        runHighFreqLoop();
-    }
-}
-
-function runHighFreqLoop() {
-    if (checkTimeout) clearTimeout(checkTimeout);
-    if (settings.realTimeMode) return; // Don't run loop if in real-time mode
+    console.log("[Manager] REAL-TIME MODE ACTIVE.");
+    // Create a fast alarm to keep the service worker alive
+    chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 });
     
+    // Initialize one WebSocket transport. Twitch limits websocket transports per user,
+    // so batching by socket can exhaust the account-level transport cap.
+    initAllEventSub(settings.streamers, settings.accessToken, settings.clientId);
+    
+    // Check current status immediately because EventSub only triggers on new transitions
     checkStreamersAndRedeem();
-    const intervalMs = settings.checkInterval * 1000;
-    checkTimeout = setTimeout(runHighFreqLoop, intervalMs);
 }
+
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'UPDATE_ALARM') {
         loadAndSchedule();
         sendResponse({ success: true });
     } else if (message.type === 'CHECK_NOW') {
-        checkStreamersAndRedeem(message.forceRedeem, message.streamerLogin);
+        checkStreamersAndRedeem(message.forceRedeem, message.streamerLogin, message.rewardId, message.userInput);
         sendResponse({ success: true });
     } else if (message.type === 'TEST_WATCH') {
         testWatchStreak(message.streamerLogin).then(() => sendResponse({ success: true }));
@@ -77,27 +78,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
 });
 
-function createAlarm() {
-    // Legacy - replaced by loadAndSchedule logic
-}
-
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-    // When the service worker wakes up from sleep, global variables are reset.
-    // Fetch critical settings from storage to ensure we take the right action.
-    const result = await chrome.storage.local.get(["realTimeMode", "checkInterval"]);
-    const isRealTime = result.realTimeMode || false;
-    if (result.checkInterval) settings.checkInterval = result.checkInterval;
-
-    if (alarm.name === ALARM_NAME) {
-        if (!isRealTime) {
-            runHighFreqLoop();
+    if (alarm.name === KEEP_ALIVE_ALARM) {
+        // Ensure we are connected
+        const allConnected = eventSubSockets.length > 0 && eventSubSockets.every(s => s.readyState === WebSocket.OPEN);
+        const anyConnecting = eventSubSockets.some(s => s.readyState === WebSocket.CONNECTING);
+        if (!allConnected) {
+            if (!anyConnecting) {
+                console.log("[Manager] EventSub is disconnected. Scheduling reconnect...");
+                scheduleEventSubReconnect();
+                checkStreamersAndRedeem();
+            }
         }
-    } else if (alarm.name === KEEP_ALIVE_ALARM) {
-        // If we wake up and real-time is on, ensure we are connected
-        if (isRealTime && (typeof eventSubSocket === 'undefined' || !eventSubSocket || eventSubSocket.readyState !== WebSocket.OPEN)) {
-            console.log("[Manager] Service Worker woke up. Reconnecting EventSub...");
-            loadAndSchedule();
-        }
+    } else if (alarm.name === EVENTSUB_RECONNECT_ALARM) {
+        console.log("[Manager] Reconnecting EventSub...");
+        chrome.alarms.clear(EVENTSUB_RECONNECT_ALARM);
+        loadAndSchedule();
     } else if (alarm.name.startsWith('closeWindow_')) {
         const parts = alarm.name.split('_');
         if (parts.length > 1) {
@@ -105,220 +101,307 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
             chrome.windows.remove(windowId).catch(err => {
                 console.log(`[Watch Streak] Could not remove window ${windowId} (might be already closed):`, err);
             });
-            console.log(`[Watch Streak] Finished 15-minute streak watch. Closed window ${windowId}.`);
+            console.log(`[Watch Streak] Finished streak watch. Closed window ${windowId}.`);
         }
     }
 
-    // Forcefully keep alive the service worker to prevent it from dropping connections repeatedly
-    if (isRealTime || settings.checkInterval < 60) {
-        chrome.runtime.getPlatformInfo(() => { /* No-op just to keep SW alive */ });
-    }
+    // Forcefully keep alive the service worker
+    chrome.runtime.getPlatformInfo(() => { /* No-op */ });
 });
+
+// --- EventSub WebSocket Logic (Merged and Enhanced) ---
+
+function initAllEventSub(streamers, accessToken, clientId) {
+    if (!streamers || streamers.length === 0) return;
+    if (!accessToken || !clientId) {
+        console.warn("[EventSub] Missing access token or client id. Skipping real-time subscriptions.");
+        return;
+    }
+
+    console.log(`[EventSub] Initializing WebSocket for ${streamers.length} streamer(s)...`);
+    createEventSubSocket(streamers, accessToken, clientId, ++eventSubGeneration);
+}
+
+function createEventSubSocket(streamers, accessToken, clientId, generation, url = TWITCH_EVENTSUB_WS_URL, shouldSubscribe = true) {
+    const socket = new WebSocket(url);
+    eventSubSockets.push(socket);
+
+    let currentSessionId = null;
+    let expectedKeepAliveSeconds = 10;
+    let skipCloseReconnect = false;
+
+    socket.onmessage = (event) => {
+        if (generation !== eventSubGeneration) return;
+        const data = JSON.parse(event.data);
+        const { metadata, payload } = data;
+        const messageType = metadata.message_type;
+        resetKeepAliveTimer(expectedKeepAliveSeconds);
+
+        switch (messageType) {
+            case "session_welcome":
+                currentSessionId = payload.session.id;
+                expectedKeepAliveSeconds = payload.session.keepalive_timeout_seconds || expectedKeepAliveSeconds;
+                eventSubReconnectDelayMinutes = 0.5;
+                console.log("[EventSub] Session Welcome! ID:", currentSessionId);
+                if (shouldSubscribe) {
+                    subscribeToBatch(streamers, accessToken, clientId, currentSessionId);
+                }
+                break;
+
+            case "session_keepalive":
+                resetKeepAliveTimer(expectedKeepAliveSeconds);
+                break;
+
+            case "notification":
+                handleEventSubNotification(payload);
+                break;
+
+            case "session_reconnect":
+                const reconnectUrl = payload.session.reconnect_url;
+                console.log("[EventSub] Twitch requested WebSocket reconnect.");
+                eventSubSockets = eventSubSockets.filter(s => s !== socket);
+                createEventSubSocket(streamers, accessToken, clientId, generation, reconnectUrl, false);
+                skipCloseReconnect = true;
+                socket.close();
+                break;
+        }
+    };
+
+    socket.onclose = () => {
+        console.warn("[EventSub] WebSocket Closed.");
+        eventSubSockets = eventSubSockets.filter(s => s !== socket);
+        if (generation === eventSubGeneration && !skipCloseReconnect) {
+            clearKeepAliveTimer();
+            scheduleEventSubReconnect();
+        }
+    };
+
+    socket.onerror = (err) => {
+        console.error("[EventSub] WebSocket Error:", err);
+    };
+}
+
+async function subscribeToBatch(streamers, accessToken, clientId, sessionId) {
+    const subscribedUserIds = new Set();
+    for (let streamer of streamers) {
+        try {
+            const { success, userId } = await checkIsLive(streamer.login);
+            if (!success || !userId) continue;
+            if (subscribedUserIds.has(userId)) continue;
+            subscribedUserIds.add(userId);
+
+            console.log(`[EventSub] Subscribing to ${streamer.login} (${userId}) on session ${sessionId}...`);
+
+            const response = await fetch("https://api.twitch.tv/helix/eventsub/subscriptions", {
+                method: "POST",
+                headers: {
+                    "Client-Id": clientId,
+                    "Authorization": `Bearer ${accessToken}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    type: "stream.online",
+                    version: "1",
+                    condition: { broadcaster_user_id: userId },
+                    transport: {
+                        method: "websocket",
+                        session_id: sessionId
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                console.error(`[EventSub] Watching failed for ${streamer.login}:`, err.message);
+                if (isEventSubTransportLimitError(err.message)) {
+                    scheduleEventSubReconnect(true);
+                    break;
+                }
+            }
+        } catch (e) {
+            console.error(`[EventSub] Error Watching to ${streamer.login}:`, e);
+        }
+    }
+}
+
+function isEventSubTransportLimitError(message = "") {
+    return message.includes("websocket transport") || message.includes("websocket transports");
+}
+
+function handleEventSubNotification(payload) {
+    const { event } = payload;
+    const login = event.broadcaster_user_login;
+    const userId = event.broadcaster_user_id;
+
+    console.log(`[REAL-TIME] Notification: ${login} is now LIVE!`);
+    checkStreamersAndRedeem(false, login, null, null, userId);
+}
+
+function resetKeepAliveTimer(expectedKeepAliveSeconds = 10) {
+    if (keepAliveTimeout) clearTimeout(keepAliveTimeout);
+    keepAliveTimeout = setTimeout(() => {
+        console.warn("[EventSub] Missed keepalive. Refreshing all...");
+        loadAndSchedule();
+    }, (expectedKeepAliveSeconds + 5) * 1000);
+}
+
+function clearKeepAliveTimer() {
+    if (keepAliveTimeout) {
+        clearTimeout(keepAliveTimeout);
+        keepAliveTimeout = null;
+    }
+}
+
+function scheduleEventSubReconnect(useBackoff = false) {
+    if (useBackoff) {
+        eventSubReconnectDelayMinutes = Math.min(eventSubReconnectDelayMinutes * 2, 5);
+    }
+    chrome.alarms.get(EVENTSUB_RECONNECT_ALARM, (existingAlarm) => {
+        if (existingAlarm) return;
+        chrome.alarms.create(EVENTSUB_RECONNECT_ALARM, { delayInMinutes: eventSubReconnectDelayMinutes });
+    });
+}
+
+function closeAllEventSub() {
+    eventSubGeneration++;
+    eventSubSockets.forEach(s => s.close());
+    eventSubSockets = [];
+    clearKeepAliveTimer();
+    eventSubReconnectDelayMinutes = 0.5;
+}
+
+// --- Redemption and Manager Logic ---
 
 let _checkQueue = Promise.resolve();
 
-function checkStreamersAndRedeem(forceRedeem = false, forceLogin = null) {
-    _checkQueue = _checkQueue.then(() => _doCheckStreamersAndRedeem(forceRedeem, forceLogin)).catch(console.error);
+function checkStreamersAndRedeem(forceRedeem = false, forceLogin = null, rewardId = null, forceUserInput = null, forceUserId = null) {
+    _checkQueue = _checkQueue.then(() => _doCheckStreamersAndRedeem(forceRedeem, forceLogin, rewardId, forceUserInput, forceUserId)).catch(console.error);
     return _checkQueue;
 }
 
-async function _doCheckStreamersAndRedeem(forceRedeem, forceLogin) {
-    const data = await chrome.storage.local.get(["clientId", "accessToken", "streamers", "redeemHistory", "activityLog"]);
-    if (!data.streamers || data.streamers.length === 0) return;
+async function _doCheckStreamersAndRedeem(forceRedeem, forceLogin, forceRewardId, forceUserInput, forceUserId = null) {
+    let streamers = settings.streamers;
+    let accessToken = settings.accessToken;
 
-    let history = data.redeemHistory || [];
-    let activityLog = data.activityLog || [];
+    if (!streamers || streamers.length === 0) {
+        const data = await chrome.storage.local.get(["streamers", "accessToken"]);
+        streamers = data.streamers || [];
+        accessToken = data.accessToken || "";
+    }
 
+    if (!streamers || streamers.length === 0) return;
 
-    for (let streamer of data.streamers) {
+    let history = null;
+    let activityLog = null;
+    let logsLoaded = false;
+
+    async function ensureLogsLoaded() {
+        if (logsLoaded) return;
+        const data = await chrome.storage.local.get(["redeemHistory", "activityLog"]);
+        history = data.redeemHistory || [];
+        activityLog = data.activityLog || [];
+        logsLoaded = true;
+    }
+
+    for (let streamer of streamers) {
         if (forceLogin && streamer.login !== forceLogin) continue;
+        if (forceRewardId && streamer.rewardId !== forceRewardId) continue;
 
         try {
-            const { isLive } = await checkIsLive(streamer.login);
-            
-            // Trigger if: (Now Live AND Was Offline) OR (ForceRedeem is true)
+            let isLive = false;
+            let userId = forceUserId;
+
+            if (forceUserId && streamer.login === forceLogin) {
+                isLive = true;
+            } else {
+                const check = await checkIsLive(streamer.login);
+                if (!check.success) continue;
+                isLive = check.isLive;
+                userId = check.userId;
+            }
+
             if ((isLive && !streamer.lastLiveStatus) || forceRedeem) {
                 const action = forceRedeem ? "Manual Test" : "Going LIVE";
-                console.log(`${streamer.login} is ${action}!`);
-                
+                console.log(`[Manager] ${streamer.login} is ${action}!`);
                 const liveAt = new Date().toLocaleTimeString();
-                
-                // Track Live Status Event
-                activityLog.unshift({
-                    type: "LIVE_DETECTED",
-                    login: streamer.login,
-                    timestamp: liveAt,
-                    status: "detected"
-                });
-                
-                if (streamer.enableRedeem !== false && streamer.rewardId) {
-                    try {
-                        await redeemReward(streamer, data.accessToken);
-                        const completedAt = new Date().toLocaleTimeString();
-                        
-                        history.unshift({
-                            login: streamer.login,
-                            reward: streamer.rewardTitle,
-                            status: "SUCCESS",
-                            liveAt,
-                            completedAt,
-                            type: action
-                        });
-                        
-                        chrome.notifications.create({
-                            type: "basic",
-                            iconUrl: "icons/icon128.png",
-                            title: "Twitch Auto Redeemer SUCCESS",
-                            message: `Successfully redeemed "${streamer.rewardTitle}" for ${streamer.login}!`
-                        });
-                    } catch (redeemErr) {
-                        history.unshift({
-                            login: streamer.login,
-                            reward: streamer.rewardTitle || "Watch Streak Only",
-                            status: "FAILED",
-                            reason: redeemErr.message,
-                            liveAt,
-                            completedAt: new Date().toLocaleTimeString(),
-                            type: action
-                        });
 
-                        chrome.notifications.create({
-                            type: "basic",
-                            iconUrl: "icons/icon128.png",
-                            title: "Twitch Auto Redeemer ERROR",
-                            message: `Failed to redeem for ${streamer.login}: ${redeemErr.message}`
-                        });
-                    }
+                await ensureLogsLoaded();
+                activityLog.unshift({ type: "LIVE_DETECTED", login: streamer.login, timestamp: liveAt, status: "detected" });
+
+                const redemptionData = { ...streamer };
+                if (forceRedeem && forceUserInput !== null) redemptionData.userInput = forceUserInput;
+
+                const tasks = [];
+                if (streamer.enableRedeem !== false && streamer.rewardId) {
+                    tasks.push((async () => {
+                        try {
+                            await redeemReward(redemptionData, accessToken, userId);
+                            await ensureLogsLoaded();
+                            history.unshift({ login: streamer.login, reward: streamer.rewardTitle, status: "SUCCESS", liveAt, completedAt: new Date().toLocaleTimeString(), type: action });
+                            chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: "Twitch Auto Redeemer SUCCESS", message: `Successfully redeemed "${streamer.rewardTitle}" for ${streamer.login}!` });
+                        } catch (err) {
+                            await ensureLogsLoaded();
+                            history.unshift({ login: streamer.login, reward: streamer.rewardTitle || "Watch Streak Only", status: "FAILED", reason: err.message, liveAt, completedAt: new Date().toLocaleTimeString(), type: action });
+                            chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: "Twitch Auto Redeemer ERROR", message: `Failed to redeem for ${streamer.login}: ${err.message}` });
+                        }
+                    })());
                 }
 
                 if (streamer.enableWatch !== false && !forceRedeem) {
-                    try {
-                        const url = `https://www.twitch.tv/${streamer.login}`;
-                        // We avoid "minimized" because Chrome freezes those tabs, stopping the watch streak.
-                        // Instead, we open a small, unfocused window.
-                        const win = await chrome.windows.create({ 
-                            url: url, 
-                            state: "normal", 
-                            focused: false,
-                            width: 400,
-                            height: 300,
-                            type: "popup"
-                        });
-
-                        // Attempt to push it into the background by focusing the current window
+                    tasks.push((async () => {
                         try {
-                            const currentWin = await chrome.windows.getCurrent();
-                            if (currentWin) {
-                                await chrome.windows.update(currentWin.id, { focused: true });
-                            }
-                        } catch (e) {
-                            console.log("[Watch Streak] Could not restore focus:", e);
+                            const win = await openWatchWindow(streamer.login);
+                            await ensureLogsLoaded();
+                            activityLog.unshift({ type: "BROWSER_OPENED", login: streamer.login, timestamp: new Date().toLocaleTimeString(), status: "success", windowId: win.id });
+                        } catch (err) {
+                            await ensureLogsLoaded();
+                            activityLog.unshift({ type: "BROWSER_OPENED", login: streamer.login, timestamp: new Date().toLocaleTimeString(), status: "failed", error: err.message });
                         }
-
-                        // Track Browser Open Event
-                        activityLog.unshift({
-                            type: "BROWSER_OPENED",
-                            login: streamer.login,
-                            timestamp: new Date().toLocaleTimeString(),
-                            status: "success",
-                            windowId: win.id
-                        });
-
-                        console.log(`[Watch Streak] Opened background window for ${streamer.login}. Will close in 15 minutes.`);
-                        
-                        try {
-                            if (win.tabs && win.tabs.length > 0) {
-                                await chrome.tabs.update(win.tabs[0].id, { muted: true });
-                            }
-                        } catch (muteErr) {
-                            console.warn(`[Watch Streak] Could not mute window tab:`, muteErr);
-                        }
-                        
-                        // Set alarm to close the window after 15 minutes to secure the streak
-                        const alarmName = `closeWindow_${win.id}_${Date.now()}`;
-                        chrome.alarms.create(alarmName, { delayInMinutes: 15 });
-                    } catch (winErr) {
-                        console.error(`[Watch Streak] Failed to open window for ${streamer.login}:`, winErr);
-                        activityLog.unshift({
-                            type: "BROWSER_OPENED",
-                            login: streamer.login,
-                            timestamp: new Date().toLocaleTimeString(),
-                            status: "failed",
-                            error: winErr.message
-                        });
-                    }
+                    })());
                 }
+                if (tasks.length > 0) await Promise.all(tasks);
             }
-
             streamer.lastLiveStatus = isLive;
         } catch (e) {
-            console.error(`Error checking/redeeming for ${streamer.login}:`, e);
+            console.error(`Error for ${streamer.login}:`, e);
         }
     }
 
-    // Keep history manageable (last 20 items)
-    history = history.slice(0, 20);
-    activityLog = activityLog.slice(0, 30); // A bit more for activity log
-
-    await chrome.storage.local.set({ 
-        streamers: data.streamers, 
-        redeemHistory: history,
-        activityLog: activityLog
-    });
+    if (logsLoaded) {
+        history = history.slice(0, 20);
+        activityLog = activityLog.slice(0, 30);
+        await chrome.storage.local.set({ redeemHistory: history, activityLog: activityLog });
+    }
+    await chrome.storage.local.set({ streamers: streamers });
 }
 
 async function checkIsLive(login) {
     const fixedLogin = login.toLowerCase().trim();
     const cookieToken = await getAuthToken();
-    
-    const query = `query GetStreamerStatus($login: String!) {
-        channel(name: $login) {
-            id
-            stream {
-                id
-                type
-            }
-        }
-    }`;
-    const body = {
-        operationName: "GetStreamerStatus",
-        variables: { login: fixedLogin },
-        query: query
-    };
+    const activeClientId = cookieToken ? "kimne78kx3ncx6brgo4mv6wki5h1ko" : (settings.clientId || "kimne78kx3ncx6brgo4mv6wki5h1ko");
 
-    const headers = {
-        "Client-Id": "kimne78kx3ncx6br8ac4hz66l2s7vv", 
-        "Content-Type": "application/json"
-    };
-
-    if (cookieToken) {
-        headers["Authorization"] = `OAuth ${cookieToken}`;
-    }
+    const headers = { "Client-Id": activeClientId, "Content-Type": "application/json" };
+    if (cookieToken) headers["Authorization"] = `OAuth ${cookieToken}`;
 
     try {
         const response = await fetch(TWITCH_GQL_URL, {
             method: "POST",
             headers: headers,
-            body: JSON.stringify(body)
+            body: JSON.stringify({
+                operationName: "GetStreamerStatus",
+                variables: { login: fixedLogin },
+                query: `query GetStreamerStatus($login: String!) { channel(name: $login) { id stream { id type } } }`
+            })
         });
-
         const json = await response.json();
-        
-        // Ensure we only mark as live if stream type is 'live'
         const channel = json.data?.channel;
-        const isLive = !!channel?.stream && channel.stream.type === 'live';
-        
-        return {
-            isLive: isLive,
-            userId: channel?.id
-        };
+        if (!channel) throw new Error("No channel data found");
+        return { success: true, isLive: !!channel?.stream && channel.stream.type === 'live', userId: channel?.id };
     } catch (e) {
-        console.error(`[Fetch Error] ${fixedLogin}:`, e);
-        return { isLive: false, userId: null };
+        return { success: false, isLive: false, userId: null };
     }
 }
 
-// Twitch use GQL for redeeming as a viewer
 async function getAuthToken() {
     return new Promise((resolve) => {
         chrome.cookies.get({ url: "https://www.twitch.tv", name: "auth-token" }, (cookie) => {
@@ -327,19 +410,18 @@ async function getAuthToken() {
     });
 }
 
-async function redeemReward(streamer, backupToken) {
+async function redeemReward(streamer, backupToken, providedUserId = null) {
     const cookieToken = await getAuthToken();
     const activeToken = cookieToken || backupToken;
-    
-    // Fallback if no token at all
-    if (!activeToken) {
-        throw new Error("You must be logged into Twitch in your browser to redeem rewards.");
+    if (!activeToken) throw new Error("You must be logged into Twitch in your browser.");
+
+    let userId = providedUserId;
+    if (!userId) {
+        const check = await checkIsLive(streamer.login);
+        if (!check.success || !check.userId) throw new Error("Could not find channel ID.");
+        userId = check.userId;
     }
 
-    const { userId } = await checkIsLive(streamer.login);
-    if (!userId) throw new Error("Could not find channel ID.");
-
-    // Exact reverse-engineered structure from Twitch's own GQL system
     const body = {
         operationName: "RedeemCustomReward",
         variables: {
@@ -347,24 +429,20 @@ async function redeemReward(streamer, backupToken) {
                 channelID: userId,
                 cost: parseInt(streamer.rewardCost) || 0,
                 pricingType: "POINTS",
-                prompt: null,
+                prompt: streamer.rewardPrompt || "",
                 rewardID: streamer.rewardId,
-                title: streamer.rewardTitle,
-                transactionID: self.crypto.randomUUID().replace(/-/g, '') // Twitch expects a clean hex UUID
+                textInput: streamer.userInput || null,
+                title: streamer.rewardTitle || "",
+                transactionID: self.crypto.randomUUID().replace(/-/g, '')
             }
         },
-        extensions: {
-            persistedQuery: {
-                version: 1,
-                sha256Hash: "d56249a7adb4978898ea3412e196688d4ac3cea1c0c2dfd65561d229ea5dcc42"
-            }
-        }
+        extensions: { persistedQuery: { version: 1, sha256Hash: "d56249a7adb4978898ea3412e196688d4ac3cea1c0c2dfd65561d229ea5dcc42" } }
     };
 
     const response = await fetch(TWITCH_GQL_URL, {
         method: "POST",
         headers: {
-            "Client-Id": "kimne78kx3ncx6br8ac4hz66l2s7vv", 
+            "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
             "Authorization": `OAuth ${activeToken}`,
             "Content-Type": "application/json"
         },
@@ -372,88 +450,25 @@ async function redeemReward(streamer, backupToken) {
     });
 
     const json = await response.json();
-    const result = json.data?.redeemCustomReward;
-    
-    // Log the result for debugging
-    if (result?.error) {
-        const errorMsg = result.error.message || result.error.errorCode || "Unknown Error";
-        console.error(`[Redeem Error] ${streamer.login}:`, errorMsg);
-        throw new Error(errorMsg);
-    } 
-    
-    if (json.errors && json.errors.length > 0) {
-        console.error(`[GQL Error] ${streamer.login}:`, json.errors[0].message);
-        throw new Error(json.errors[0].message);
-    } 
-    
-    if (result?.redemption) {
-        const status = result.redemption.status;
-        console.log(`[Redeem Success] ${streamer.login}:`, status);
-        
-        // If status is specifically known as failed/canceled/rejected, throw instead of returning success
-        if (status && ["CANCELED", "REFUNDED", "REJECTED"].includes(status.toUpperCase())) {
-            throw new Error(`Redemption ${status.toLowerCase()} by Twitch server.`);
-        }
-        
-        return result.redemption;
-    } 
-
-    // If we're here, it means we don't have a redemption object AND we don't have a known error
-    console.warn(`[Redeem Warning] ${streamer.login}: No result found in GQL response.`);
-    console.debug(`Full Response:`, JSON.stringify(json));
-    
-    // Check if the overall response was empty or null
-    if (!json.data) {
-        throw new Error("Twitch returned an empty response. You might need to refresh your login.");
-    }
-
-    throw new Error("Redemption failed: The reward might no longer be available or the limit was reached.");
+    if (json.errors) throw new Error(json.errors[0].message);
+    if (json.data?.redeemCustomReward?.error) throw new Error(json.data.redeemCustomReward.error.message);
+    return json.data?.redeemCustomReward?.redemption || { status: "FULFILLED" };
 }
 
 async function testWatchStreak(login) {
-    console.log(`[Watch Streak Test] Testing window for ${login}...`);
-    try {
-        const url = `https://www.twitch.tv/${login}`;
-        const win = await chrome.windows.create({ 
-            url: url, 
-            state: "normal", 
-            focused: false,
-            width: 400,
-            height: 300,
-            type: "popup"
-        });
-        
-        // Attempt to push it into the background
-        try {
-            const currentWin = await chrome.windows.getCurrent();
-            if (currentWin) {
-                await chrome.windows.update(currentWin.id, { focused: true });
-            }
-        } catch (e) {
-            console.log("[Watch Streak Test] Could not restore focus:", e);
-        }
-
-        try {
-            if (win.tabs && win.tabs.length > 0) {
-                await chrome.tabs.update(win.tabs[0].id, { muted: true });
-            }
-        } catch (muteErr) {
-            console.warn(`[Watch Streak Test] Could not mute window tab:`, muteErr);
-        }
-        
-        // Close after 1 minute for testing purposes
-        const alarmName = `closeWindow_${win.id}_${Date.now()}`;
-        chrome.alarms.create(alarmName, { delayInMinutes: 1 });
-        
-        chrome.notifications.create({
-            type: "basic",
-            iconUrl: "icons/icon128.png",
-            title: "Test Watch Streak",
-            message: `Background window opened for ${login}. It is muted and will automatically close in 1 minute.`
-        });
-    } catch (err) {
-        console.error(`[Watch Streak Test] Failed:`, err);
-        throw err;
-    }
+    const win = await openWatchWindow(login);
+    chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: "Test Watch Streak", message: `Background window opened for ${login}.` });
 }
 
+async function openWatchWindow(login) {
+    const win = await chrome.windows.create({ url: `https://www.twitch.tv/${login}`, state: "normal", focused: true, width: 800, height: 400, type: "popup" });
+    try {
+        const currentWin = await chrome.windows.getCurrent();
+        if (currentWin) await chrome.windows.update(currentWin.id, { focused: true });
+    } catch (e) {}
+    try {
+        if (win.tabs && win.tabs.length > 0) await chrome.tabs.update(win.tabs[0].id, { muted: true });
+    } catch (e) {}
+    chrome.alarms.create(`closeWindow_${win.id}_${Date.now()}`, { delayInMinutes: 20 });
+    return win;
+}
