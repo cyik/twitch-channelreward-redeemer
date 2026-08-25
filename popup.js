@@ -44,11 +44,25 @@ refreshBtn.addEventListener('click', async () => {
     }, 1500);
 });
 
+function formatLogDate(dateStr) {
+    if (!dateStr) {
+        return new Date().toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    }
+    // If it already has a full date format (like "Aug 25, 2026, 9:06:45 PM" or "8/25/2026, 9:06:45 PM")
+    if (dateStr.includes('/') || dateStr.includes('-') || dateStr.includes(',')) {
+        return dateStr;
+    }
+    // Legacy time-only entry: attach date
+    const today = new Date().toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${today}, ${dateStr}`;
+}
+
 function updateUI() {
-    chrome.storage.local.get(['streamers', 'redeemHistory', 'activityLog'], (data) => {
+    chrome.storage.local.get(['streamers', 'redeemHistory', 'activityLog', 'watchStreaks'], (data) => {
         const streamers = data.streamers || [];
         const history = data.redeemHistory || [];
         const activity = data.activityLog || [];
+        const streaks = data.watchStreaks || {};
 
         activeCountEl.textContent = `${streamers.length} Tracked`;
 
@@ -63,6 +77,9 @@ function updateUI() {
                 div.draggable = true;
                 div.dataset.index = index;
 
+                const streakData = streaks[s.login.toLowerCase()];
+                const streakCount = streakData ? streakData.value : null;
+
                 div.innerHTML = `
                     <div class="drag-handle">
                         <span></span>
@@ -70,7 +87,15 @@ function updateUI() {
                         <span></span>
                     </div>
                     <div class="streamer-info">
-                        <h4><span class="live-indicator ${s.lastLiveStatus ? 'active' : ''}"></span>${s.login}</h4>
+                        <h4 style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                            <span class="live-indicator ${s.lastLiveStatus ? 'active' : ''}"></span>
+                            ${s.login}
+                            ${streakCount !== null ? `
+                                <span title="Watch Streak" style="font-size: 10px; color: #ff8c00; font-weight: 700; margin-left: 4px; background: rgba(255, 140, 0, 0.15); padding: 1px 6px; border-radius: 10px; border: 1px solid rgba(255, 140, 0, 0.3); display: inline-flex; align-items: center; gap: 2px;">
+                                    🔥 ${streakCount}
+                                </span>
+                            ` : ''}
+                        </h4>
                         <p style="font-size: 10px; color: #888;">${s.rewardTitle}</p>
                     </div>
                     <span style="font-size: 11px; color: ${s.lastLiveStatus ? '#ff4a4a' : '#666'};">
@@ -157,40 +182,33 @@ function updateUI() {
                         </span>
                     </div>
                     <div style="color: #bbb; margin-top: 2px;">${item.reward}</div>
-                    <div style="color: #666; font-size: 9px; margin-top: 4px;">Recorded at ${item.completedAt}</div>
+                    <div style="color: #666; font-size: 9px; margin-top: 4px;">Recorded at ${formatLogDate(item.completedAt)}</div>
                 `;
                 historyListEl.appendChild(div);
             });
         }
 
-        // 3. Update Activity Log
+        // 3. Update Activity Log (Filter out browser open logs, keep only live activity logs)
         const activityListEl = document.getElementById('activityList');
         activityListEl.innerHTML = '';
-        if (activity.length === 0) {
-            activityListEl.innerHTML = '<p style="text-align: center; color: #888; font-size: 11px; padding: 20px;">No recent activity.</p>';
+        const liveActivityOnly = activity.filter(item => item.type !== 'BROWSER_OPENED');
+        if (liveActivityOnly.length === 0) {
+            activityListEl.innerHTML = '<p style="text-align: center; color: #888; font-size: 11px; padding: 20px;">No recent live activity.</p>';
         } else {
-            activity.forEach(item => {
+            liveActivityOnly.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'activity-item';
 
-                let badgeClass = 'badge-live';
-                let label = 'LIVE';
-                let description = `Streamer ${item.login} detected online.`;
-
-                if (item.type === 'BROWSER_OPENED') {
-                    badgeClass = 'badge-browser';
-                    label = 'BROWSER';
-                    description = item.status === 'success'
-                        ? `Opened watch tab for ${item.login}.`
-                        : `Failed to open tab for ${item.login}.`;
-                }
+                const badgeClass = 'badge-live';
+                const label = 'LIVE';
+                const description = `Streamer ${item.login} detected online.`;
 
                 div.innerHTML = `
                     <div>
                         <span class="activity-badge ${badgeClass}">${label}</span>
                         <span>${description}</span>
                     </div>
-                    <div class="activity-time">${item.timestamp}</div>
+                    <div class="activity-time">${formatLogDate(item.timestamp)}</div>
                 `;
                 activityListEl.appendChild(div);
             });

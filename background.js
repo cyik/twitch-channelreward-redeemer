@@ -64,11 +64,11 @@ async function _loadAndSchedule() {
     console.log("[Manager] REAL-TIME MODE ACTIVE.");
     // Create a fast alarm to keep the service worker alive
     chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 });
-    
+
     // Initialize one WebSocket transport. Twitch limits websocket transports per user,
     // so batching by socket can exhaust the account-level transport cap.
     initAllEventSub(settings.streamers, settings.accessToken, settings.clientId);
-    
+
     // Check current status immediately because EventSub only triggers on new transitions
     checkStreamersAndRedeem();
 }
@@ -332,7 +332,7 @@ async function _doCheckStreamersAndRedeem(forceRedeem, forceLogin, forceRewardId
             if ((isLive && !streamer.lastLiveStatus) || forceRedeem) {
                 const action = forceRedeem ? "Manual Test" : "Going LIVE";
                 console.log(`[Manager] ${streamer.login} is ${action}!`);
-                const liveAt = new Date().toLocaleTimeString();
+                const liveAt = new Date().toLocaleString();
 
                 await ensureLogsLoaded();
                 activityLog.unshift({ type: "LIVE_DETECTED", login: streamer.login, timestamp: liveAt, status: "detected" });
@@ -346,11 +346,11 @@ async function _doCheckStreamersAndRedeem(forceRedeem, forceLogin, forceRewardId
                         try {
                             await redeemReward(redemptionData, accessToken, userId);
                             await ensureLogsLoaded();
-                            history.unshift({ login: streamer.login, reward: streamer.rewardTitle, status: "SUCCESS", liveAt, completedAt: new Date().toLocaleTimeString(), type: action });
+                            history.unshift({ login: streamer.login, reward: streamer.rewardTitle, status: "SUCCESS", liveAt, completedAt: new Date().toLocaleString(), type: action });
                             chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: "Twitch Auto Redeemer SUCCESS", message: `Successfully redeemed "${streamer.rewardTitle}" for ${streamer.login}!` });
                         } catch (err) {
                             await ensureLogsLoaded();
-                            history.unshift({ login: streamer.login, reward: streamer.rewardTitle || "Watch Streak Only", status: "FAILED", reason: err.message, liveAt, completedAt: new Date().toLocaleTimeString(), type: action });
+                            history.unshift({ login: streamer.login, reward: streamer.rewardTitle || "Watch Streak Only", status: "FAILED", reason: err.message, liveAt, completedAt: new Date().toLocaleString(), type: action });
                             chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: "Twitch Auto Redeemer ERROR", message: `Failed to redeem for ${streamer.login}: ${err.message}` });
                         }
                     })());
@@ -359,12 +359,9 @@ async function _doCheckStreamersAndRedeem(forceRedeem, forceLogin, forceRewardId
                 if (streamer.enableWatch !== false && !forceRedeem) {
                     tasks.push((async () => {
                         try {
-                            const win = await openWatchWindow(streamer.login);
-                            await ensureLogsLoaded();
-                            activityLog.unshift({ type: "BROWSER_OPENED", login: streamer.login, timestamp: new Date().toLocaleTimeString(), status: "success", windowId: win.id });
+                            await openWatchWindow(streamer.login);
                         } catch (err) {
-                            await ensureLogsLoaded();
-                            activityLog.unshift({ type: "BROWSER_OPENED", login: streamer.login, timestamp: new Date().toLocaleTimeString(), status: "failed", error: err.message });
+                            console.error(`Failed to open watch window for ${streamer.login}:`, err);
                         }
                     })());
                 }
@@ -517,14 +514,14 @@ async function testWatchStreak(login) {
 async function openWatchWindow(login) {
     const cleanLogin = login.toLowerCase().trim();
     const win = await chrome.windows.create({ url: `https://www.twitch.tv/${cleanLogin}`, state: "normal", focused: true, width: 800, height: 400, type: "popup" });
-    
+
     try {
         const currentWin = await chrome.windows.getCurrent();
         if (currentWin) await chrome.windows.update(currentWin.id, { focused: true });
-    } catch (e) {}
+    } catch (e) { }
     try {
         if (win.tabs && win.tabs.length > 0) await chrome.tabs.update(win.tabs[0].id, { muted: true });
-    } catch (e) {}
+    } catch (e) { }
 
     // Smart Watch Streak Verification Loop
     startSmartStreakMonitor(cleanLogin, win.id);
@@ -545,7 +542,7 @@ async function startSmartStreakMonitor(login, windowId) {
         if (elapsed > MAX_WATCH_TIME_MS) {
             clearInterval(intervalId);
             console.log(`[Smart Streak] Timeout reached (10 min) for ${login}. Closing window ${windowId}.`);
-            chrome.windows.remove(windowId).catch(() => {});
+            chrome.windows.remove(windowId).catch(() => { });
             return;
         }
 
@@ -559,7 +556,7 @@ async function startSmartStreakMonitor(login, windowId) {
             if (valueIncreased || timestampUpdated) {
                 clearInterval(intervalId);
                 console.log(`[Smart Streak] 🎉 Streak verified & updated for ${login}! New streak: ${currentData.value}. Closing window.`);
-                
+
                 // Update local storage streaks cache
                 chrome.storage.local.set({ watchStreaks: currentStreaks });
 
@@ -570,7 +567,7 @@ async function startSmartStreakMonitor(login, windowId) {
                     message: `Watch streak for ${login} is now ${currentData.value}! Watch window closed.`
                 });
 
-                chrome.windows.remove(windowId).catch(() => {});
+                chrome.windows.remove(windowId).catch(() => { });
             }
         }
     }, 15000); // Check every 15 seconds

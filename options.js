@@ -287,15 +287,15 @@ function renderStreamerList() {
 function _renderStreamerListSync(streaks) {
     streamerListEl.innerHTML = '';
     currentStreamers.forEach((s, index) => {
-            const div = document.createElement('div');
-            div.className = 'streamer-item';
-            div.draggable = true;
-            div.dataset.index = index;
+        const div = document.createElement('div');
+        div.className = 'streamer-item';
+        div.draggable = true;
+        div.dataset.index = index;
 
-            const streakData = streaks[s.login.toLowerCase()];
-            const streakCount = streakData ? streakData.value : null;
+        const streakData = streaks[s.login.toLowerCase()];
+        const streakCount = streakData ? streakData.value : null;
 
-            div.innerHTML = `
+        div.innerHTML = `
                 <div class="drag-handle">
                     <span></span>
                     <span></span>
